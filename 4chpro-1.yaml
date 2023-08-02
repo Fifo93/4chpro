@@ -1,0 +1,538 @@
+esphome:
+  name: 4chpro-1
+  on_boot:
+    then:
+      - lambda: |-
+          if (id(last_run_next) == -1) {
+            for (int i = 0; i < 50; i++) {
+              id(last_run_ring)[i] = 0;
+            }      
+            id(last_run_next) = 0;
+          }
+ 
+esp8266:
+  board: esp8285
+ 
+wifi:
+  networks:
+  - ssid: cadcam
+    password: kishulye1976
+    bssid: 60:A4:B7:5D:B6:5E
+  - ssid: cadcam
+    password: kishulye1976
+  ap:
+    ssid: 4chpro1976
+    password: 4chpro1976
+ 
+captive_portal:
+ 
+api:
+logger:
+ota:
+globals:
+  - id: next_change
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: relay_number
+    type: int
+    restore_value: yes
+    initial_value: "0"
+  - id: szelep
+    type: int[4]
+    restore_value: no
+  - id: statusz
+    type: std::string
+    restore_value: no
+  - id: alternativ
+    type: bool
+    restore_value: yes
+    initial_value: "false"
+  - id: last_run_ring
+    type: int[50]
+    restore_value: yes
+  - id: last_run_next
+    type: int
+    restore_value: yes
+    initial_value: "-1"
+
+script:
+  - id: locsolas_statusz
+    then:
+      - lambda: |-
+          std::string statusz_old = id(statusz);
+          int ido2 = (id(next_change) - id(sntp_time).now().timestamp) / 60;
+          if(id(relay_number) > 0 && id(relay_number) < 5) {
+            int ido1 = id(szelep)[id(relay_number) - 1] / 60;
+            id(statusz) = esphome::to_string(id(relay_number)) + ". szelep " + esphome::to_string(ido1) + " / " + esphome::to_string(ido2) + " perc";
+          } else {
+            id(statusz) = "A program nem fut.";
+          }
+          if (statusz_old.compare(id(statusz)) != 0) {
+            id(program).publish_state(id(statusz));
+          }
+          int now = id(sntp_time).now().timestamp;
+          int d[10];
+          for (int i = 0; i < 10; i++) {
+            d[i] = 0;
+            int diff = now - (i + 1) * 24 * 60 * 60;
+            for (int j = 0; j < 50; j++) {
+              if (id(last_run_ring)[j] >= diff) {
+                d[i]++;
+              }
+            }
+          }
+          id(d1).publish_state(d[0]);
+          id(d2).publish_state(d[1]);
+          id(d3).publish_state(d[2]);
+          id(d4).publish_state(d[3]);
+          id(d5).publish_state(d[4]);
+          id(d6).publish_state(d[5]);
+          id(d7).publish_state(d[6]);
+          id(d8).publish_state(d[7]);
+          id(d9).publish_state(d[8]);
+          id(d10).publish_state(d[9]);
+
+  - id: ha_sensor_value
+    parameters:
+      sz: int
+      value: int
+    then:
+      - lambda: |-
+          id(szelep)[sz - 1] = value;
+          ESP_LOGD("main", "szelep%d: %d", sz, value);
+
+  - id: button_press
+    parameters:
+      button: int      
+    then:
+      - lambda: |-
+          id(relay_number) = 0;
+          id(locsolas_statusz).execute();
+          id(locsolas_program).publish_state(false);
+          id(alt_locsolas_program).publish_state(false);
+          switch (button)  {
+            case 1:                
+              id(relay_1_internal).toggle();
+              break;
+            case 2:
+              id(relay_2_internal).toggle();
+              break;
+            case 3:
+              id(relay_3_internal).toggle();
+              break;
+            case 4:
+              id(relay_4_internal).toggle();
+              break;
+          }
+
+  - id: relays_publish
+    then:
+      - lambda: |-
+          id(relay_1).publish_state(id(relay_1_internal).state);
+          id(relay_2).publish_state(id(relay_2_internal).state);
+          id(relay_3).publish_state(id(relay_3_internal).state);
+          id(relay_4).publish_state(id(relay_4_internal).state);
+
+  - id: relay_turn_on
+    parameters:
+      relay: int  
+    then:
+      - lambda: |-
+          if (relay != 1) id(relay_1_internal).turn_off();
+          if (relay != 2) id(relay_2_internal).turn_off();
+          if (relay != 3) id(relay_3_internal).turn_off();
+          if (relay != 4) id(relay_4_internal).turn_off();
+          id(relays_publish).execute();
+  - id: relay_template
+    parameters:
+      relay: int
+      turn: bool
+    then:
+      - lambda: |-
+          id(relay_number) = 0;
+          if (turn) {
+            switch (relay) {
+              case 1:                
+                id(relay_1_internal).turn_on();
+                break;
+              case 2:
+                id(relay_2_internal).turn_on();
+                break;
+              case 3:
+                id(relay_3_internal).turn_on();
+                break;
+              case 4:
+                id(relay_4_internal).turn_on();
+                break;
+            }
+          } else {
+            switch (relay) {
+              case 1:                
+                id(relay_1_internal).turn_off();
+                break;
+              case 2:
+                id(relay_2_internal).turn_off();
+                break;
+              case 3:
+                id(relay_3_internal).turn_off();
+                break;
+              case 4:
+                id(relay_4_internal).turn_off();
+                break;
+            }
+          }          
+          id(locsolas_program).publish_state(false);
+          id(alt_locsolas_program).publish_state(false);
+          id(locsolas_statusz).execute();
+
+  - id: next
+    then:
+      - lambda: |-                
+          while((id(relay_number) <= 4) && (id(szelep)[id(relay_number) - 1] == 0)) {
+            id(relay_number)++;
+          }
+          if (id(relay_number) >= 1 && id(relay_number) <= 4) {
+            if (!id(alternativ)) {
+              id(locsolas_program).publish_state(true);
+            } else {
+              id(alt_locsolas_program).publish_state(true);
+            }
+            id(next_change) = id(sntp_time).now().timestamp + id(szelep)[id(relay_number) - 1];
+            ESP_LOGD("main", "szelep%d turn on for %d seconds", id(relay_number), id(szelep)[id(relay_number) - 1]);
+            switch (id(relay_number))  {
+              case 1:                              
+                id(relay_1_internal).turn_on();              
+                break;
+              case 2:                
+                id(relay_2_internal).turn_on();              
+                break;
+              case 3:                              
+                id(relay_3_internal).turn_on();                            
+                break;
+              case 4:
+                id(relay_4_internal).turn_on();              
+                break;
+            }
+          } else {
+            id(locsolas_program).publish_state(false);
+            id(alt_locsolas_program).publish_state(false);
+            id(relay_number) = 0;
+            id(relay_1_internal).turn_off();
+            id(relay_2_internal).turn_off();
+            id(relay_3_internal).turn_off();
+            id(relay_4_internal).turn_off();                            
+            ESP_LOGD("main", "Turn off all szelep");
+            if (!id(alternativ)) {
+              id(last_run_ring)[id(last_run_next)++] = id(sntp_time).now().timestamp;            
+              if (id(last_run_next) >= 50) {
+                id(last_run_next) = 0;
+              }
+            }
+          }          
+          id(locsolas_statusz).execute();
+ 
+sensor:
+  - platform: homeassistant
+    name: "szelep1"
+    entity_id: sensor.szelep1
+    id: my_szelep1
+    on_value:      
+      then:
+        - lambda: id(ha_sensor_value)->execute(1, x);
+ 
+  - platform: homeassistant
+    name: "szelep2"
+    entity_id: sensor.szelep2
+    id: my_szelep2
+    on_value:
+      then:
+        - lambda: id(ha_sensor_value)->execute(2, x);
+ 
+  - platform: homeassistant
+    name: "szelep3"
+    entity_id: sensor.szelep3
+    id: my_szelep3
+    on_value:
+      then:
+        - lambda: id(ha_sensor_value)->execute(3, x);
+ 
+  - platform: homeassistant
+    name: "szelep4"
+    entity_id: sensor.szelep4
+    id: my_szelep4
+    on_value:
+      then:
+        - lambda: id(ha_sensor_value)->execute(4, x);
+
+  - platform: template
+    name: "d1"
+    id: d1
+
+  - platform: template
+    name: "d2"
+    id: d2
+  
+  - platform: template
+    name: "d3"
+    id: d3
+
+  - platform: template
+    name: "d4"
+    id: d4
+
+  - platform: template
+    name: "d5"
+    id: d5
+
+  - platform: template
+    name: "d6"
+    id: d6
+
+  - platform: template
+    name: "d7"
+    id: d7
+
+  - platform: template
+    name: "d8"
+    id: d8
+
+  - platform: template
+    name: "d9"
+    id: d9
+
+  - platform: template
+    name: "d10"
+    id: d10
+ 
+text_sensor:
+  - platform: template
+    name: "program"
+    id: program
+    lambda: |-  
+      return(id(statusz));    
+    icon: mdi:timer-outline
+ 
+time:
+  - platform: sntp
+    servers:
+      - 0.hu.pool.ntp.org
+      - 1.hu.pool.ntp.org
+      - 2.hu.pool.ntp.org
+    id: sntp_time
+    on_time:
+      - seconds: '*'
+        then:
+          - lambda: |-
+              int ts = id(sntp_time).now().timestamp;
+              if (id(relay_number) > 0 && (id(next_change) <= ts)) {
+                // Elértünk a time limitet, szelepet váltunk                
+                id(relay_number)++;
+                id(next).execute();
+              } 
+      - seconds: 0
+        minutes: '*'
+        then:
+          - script.execute: locsolas_statusz
+
+ 
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO0
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    name: "Sonoff 4CH Button 1"
+    on_press:
+      - script.execute:
+          id: button_press
+          button: 1      
+  - platform: gpio
+    pin:
+      number: GPIO9
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    name: "Sonoff 4CH Button 2"
+    on_press:
+      - script.execute:
+          id: button_press
+          button: 2
+  - platform: gpio
+    pin:
+      number: GPIO10
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    name: "Sonoff 4CH Button 3"
+    on_press:
+      - script.execute:
+          id: button_press
+          button: 3
+  - platform: gpio
+    pin:
+      number: GPIO14
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    name: "Sonoff 4CH Button 4"
+    on_press:
+      - script.execute:
+          id: button_press
+          button: 4
+  - platform: status
+    name: "Sonoff 4CH Status"
+ 
+switch:
+  - platform: gpio
+    name: "Sonoff 4CH Relay 1"
+    pin: GPIO12
+    id: relay_1_internal
+    internal: true
+    on_turn_on:
+      - script.execute:
+          id: relay_turn_on
+          relay: 1
+    on_turn_off:
+      - script.execute: relays_publish
+  - platform: gpio
+    name: "Sonoff 4CH Relay 2"
+    pin: GPIO5
+    id: relay_2_internal
+    internal: true
+    on_turn_on:
+      - script.execute:
+          id: relay_turn_on
+          relay: 2
+    on_turn_off:
+      - script.execute: relays_publish
+  - platform: gpio
+    name: "Sonoff 4CH Relay 3"
+    pin: GPIO4
+    id: relay_3_internal
+    internal: true
+    on_turn_on:
+      - script.execute:
+          id: relay_turn_on
+          relay: 3
+    on_turn_off:
+      - script.execute: relays_publish
+  - platform: gpio
+    name: "Sonoff 4CH Relay 4"
+    pin: GPIO15
+    id: relay_4_internal
+    internal: true
+    on_turn_on:
+      - script.execute:
+          id: relay_turn_on
+          relay: 4
+    on_turn_off:
+      - script.execute: relays_publish
+  - platform: template
+    name: "Sonoff 4CH Relay 1"    
+    id: relay_1
+    turn_on_action:
+      - script.execute:
+          id: relay_template
+          relay: 1
+          turn: true      
+    turn_off_action:
+      - script.execute:
+          id: relay_template
+          relay: 1
+          turn: false
+  - platform: template
+    name: "Sonoff 4CH Relay 2"    
+    id: relay_2
+    turn_on_action:
+      - script.execute:
+          id: relay_template
+          relay: 2
+          turn: true   
+    turn_off_action:
+      - script.execute:
+          id: relay_template
+          relay: 2
+          turn: false
+  - platform: template
+    name: "Sonoff 4CH Relay 3"    
+    id: relay_3
+    turn_on_action:
+      - script.execute:
+          id: relay_template
+          relay: 3
+          turn: true   
+    turn_off_action:
+      - script.execute:
+          id: relay_template
+          relay: 3
+          turn: false
+  - platform: template
+    name: "Sonoff 4CH Relay 4"    
+    id: relay_4
+    turn_on_action:
+      - script.execute:
+          id: relay_template
+          relay: 4
+          turn: true   
+    turn_off_action:
+      - script.execute:
+          id: relay_template
+          relay: 4
+          turn: false
+  - platform: template
+    name: "Locsolás program"
+    id: locsolas_program
+    lambda: |-
+      return (id(relay_number) > 0 && !id(alternativ));
+    turn_on_action:
+      - lambda: |-
+                id(alternativ) = false;
+                id(relay_number) = 1;
+                id(next).execute();
+    turn_off_action:
+      - lambda: |-
+                id(relay_number) = 0;
+                id(relay_1_internal).turn_off();
+                id(relay_2_internal).turn_off();
+                id(relay_3_internal).turn_off();
+                id(relay_4_internal).turn_off();
+                id(locsolas_program).publish_state(false);
+                id(alt_locsolas_program).publish_state(false);
+                ESP_LOGD("main", "Turn off all szelep");
+  - platform: template
+    name: "Alternatív locsolás program"
+    id: alt_locsolas_program
+    lambda: |-
+      return (id(relay_number) > 0 && id(alternativ));
+    turn_on_action:
+      - lambda: |-
+                id(alternativ) = true;
+                id(relay_number) = 1;
+                id(next).execute();
+    turn_off_action:
+      - lambda: |-
+                id(relay_number) = 0;
+                id(relay_1_internal).turn_off();
+                id(relay_2_internal).turn_off();
+                id(relay_3_internal).turn_off();
+                id(relay_4_internal).turn_off();
+                id(locsolas_program).publish_state(false);
+                id(alt_locsolas_program).publish_state(false);
+                ESP_LOGD("main", "Turn off all szelep");
+ 
+output:
+  - platform: esp8266_pwm
+    id: blue_led
+    pin: GPIO13
+    inverted: true
+ 
+light:
+  - platform: monochromatic
+    name: "Sonoff 4CH Blue LED"
+    output: blue_led
